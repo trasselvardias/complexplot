@@ -56,6 +56,7 @@ label{display:block;font-size:12px;color:var(--muted);margin:12px 0 5px}input,se
 <div class="row"><div><label for="iter">Iterations</label><input id="iter" type="number" min="0" max="60" value="0"></div><div><label for="escape">Escape clip</label><input id="escape" type="number" min="1" value="1e6"></div></div>
 <div class="panelTitle">Teaching overlays</div><div class="row"><label><input id="showGrid" type="checkbox" checked> plane grid/axes</label><label><input id="showGraticule" type="checkbox" checked> sphere graticule</label></div><div class="row"><label><input id="showUnitCircle" type="checkbox" checked> unit circle</label><label><input id="showPhaseLegend" type="checkbox"> phase wheel</label></div><div class="row"><label><input id="lockAspect" type="checkbox" checked> equal x/y scale</label><label><input id="useGpu" type="checkbox"> experimental GPU plane renderer</label></div>
 <div class="buttonRow"><button class="primary" id="drawBtn">Draw</button><button id="resetBtn">Reset view</button></div><div class="buttonRow"><button id="fitSphereBtn">Sphere front</button><button id="fastPreviewBtn">Fast preview: on</button></div><div class="buttonRow"><button id="pathBtn">Path integral mode</button><button class="warn" id="clearPathBtn">Clear path</button></div><div class="buttonRow"><button id="exportPlaneBtn">Export plane PNG</button><button id="exportSphereBtn">Export sphere PNG</button></div>
+<div class="panelTitle">PNG export</div><label for="exportRes">Export PNG max side <span id="exportResLabel" class="badge">2160 px</span></label><input id="exportRes" type="range" min="800" max="5000" step="100" value="2160"><div class="hint">Exports are now rendered directly at this resolution, not copied from the on-screen preview, so saved PNGs stay sharp.</div>
 <div class="panelTitle">Live readout</div><div id="readout" class="status readout">Move the mouse over the complex plane.</div>
 <div class="panelTitle">Mouse controls</div><div class="hint">Plane: drag to pan, wheel to zoom. The plane is rendered with equal mathematical x/y scale when “equal x/y scale” is on.<br><br>Sphere/projection: drag to rotate the sphere coordinates, wheel to zoom. Projection modes flatten the Riemann sphere onto the canvas while preserving the same domain coloring.</div>
 <div class="panelTitle">Status</div><div id="status" class="status">Ready.</div>
@@ -366,14 +367,94 @@ function flushFullRedraw(){
   if(doPlane)drawPlane(false);
   if(doSphere)drawSphere(false);
 }
-$('drawBtn').onclick=redrawAll;$('resetBtn').onclick=()=>{planeRange={xmin:-2,xmax:2,ymin:-2,ymax:2};sphere={yaw:-.55,pitch:.35,zoom:.92};writeRange();redrawAll()};$('preset').onchange=()=>{if($('preset').value){$('expr').value=$('preset').value;redrawAll()}};$('fastPreviewBtn').onclick=()=>{fastPreview=!fastPreview;$('fastPreviewBtn').textContent=`Fast preview: ${fastPreview?'on':'off'}`};$('fitSphereBtn').onclick=()=>{sphere={yaw:-.55,pitch:.35,zoom:.92};drawSphere()};$('pathBtn').onclick=()=>{pathMode=!pathMode;planeCanvas.classList.toggle('pathMode',pathMode);status(pathMode?'Path mode on: click points; click near first point to close.':'Path mode off.')};$('clearPathBtn').onclick=()=>{pathPts=[];drawPlane();status('Path cleared.')};function downloadCanvas(c,name){const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download=name;a.click()}$('exportPlaneBtn').onclick=()=>downloadCanvas(planeCanvas,'complex-plane.png');$('exportSphereBtn').onclick=()=>downloadCanvas(sphereCanvas,'riemann-sphere-projection.png');
-for(const id of ['res','sphereRes'])$(id).oninput=()=>{$(id+'Label').textContent=$(id).value;scheduleRedraw()};for(const id of ['xmin','xmax','ymin','ymax','colorMode','iter','escape','projectionMode','showGrid','showGraticule','showUnitCircle','showPhaseLegend','lockAspect','useGpu'])$(id).addEventListener('change',scheduleRedraw);
+
+function drawPlaneOverlayOn(ctx,W,H,range){
+  ctx.save();
+  const dpr=Math.max(1,Math.min(2,W/Math.max(1,planeCanvas.clientWidth||W)));
+  ctx.lineWidth=Math.max(1,W/1800);
+  if($('showGrid').checked){
+    const step=niceStep(Math.max(range.xmax-range.xmin,range.ymax-range.ymin)/8);
+    ctx.strokeStyle='rgba(0,0,0,.18)';ctx.beginPath();
+    for(let x=Math.ceil(range.xmin/step)*step;x<=range.xmax;x+=step){const px=(x-range.xmin)/(range.xmax-range.xmin)*W;ctx.moveTo(px,0);ctx.lineTo(px,H)}
+    for(let y=Math.ceil(range.ymin/step)*step;y<=range.ymax;y+=step){const py=(range.ymax-y)/(range.ymax-range.ymin)*H;ctx.moveTo(0,py);ctx.lineTo(W,py)}
+    ctx.stroke();ctx.strokeStyle='rgba(0,0,0,.55)';ctx.lineWidth=Math.max(1.25,W/1400);ctx.beginPath();
+    const x0=(0-range.xmin)/(range.xmax-range.xmin)*W,y0=(range.ymax-0)/(range.ymax-range.ymin)*H;ctx.moveTo(x0,0);ctx.lineTo(x0,H);ctx.moveTo(0,y0);ctx.lineTo(W,y0);ctx.stroke();
+  }
+  if($('showUnitCircle').checked){
+    const cx=(0-range.xmin)/(range.xmax-range.xmin)*W,cy=(range.ymax-0)/(range.ymax-range.ymin)*H,rx=W/(range.xmax-range.xmin),ry=H/(range.ymax-range.ymin);
+    ctx.strokeStyle='rgba(0,0,0,.65)';ctx.lineWidth=Math.max(1.5,W/1200);ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);ctx.stroke();
+  }
+  if(pathPts.length){
+    ctx.lineWidth=Math.max(4,W/500);ctx.strokeStyle='rgba(0,0,0,.85)';ctx.beginPath();
+    pathPts.forEach((p,k)=>{const x=(p.re-range.xmin)/(range.xmax-range.xmin)*W,y=(range.ymax-p.im)/(range.ymax-range.ymin)*H;k?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();
+    ctx.lineWidth=Math.max(2,W/900);ctx.strokeStyle='rgba(255,255,255,.95)';ctx.stroke();
+  }
+  if($('showPhaseLegend').checked)drawPhaseLegend(ctx,W,H);
+  ctx.restore();
+}
+function drawSphereGraticuleOn(ctx,W,H,mode){
+  ctx.save();ctx.strokeStyle='rgba(255,255,255,.45)';ctx.lineWidth=Math.max(1,W/1600);
+  const drawCurve=pts=>{ctx.beginPath();let on=false,last=null;for(const p of pts){const q=projectSphereToCanvas(p[0],p[1],p[2],mode,W,H);if(!q){on=false;last=null;continue}if(last&&Math.hypot(q[0]-last[0],q[1]-last[1])>W*.45){on=false}on?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]);on=true;last=q}ctx.stroke()};
+  const spherePt=(lon,lat)=>[Math.cos(lat)*Math.sin(lon),Math.sin(lat),Math.cos(lat)*Math.cos(lon)];
+  if(mode==='sinusoidal'){
+    for(let lat=-60;lat<=60;lat+=30){const a=lat*Math.PI/180;drawCurve(Array.from({length:181},(_,k)=>spherePt(-Math.PI+2*Math.PI*k/180,a)))}
+    drawCurve(Array.from({length:121},(_,k)=>spherePt(0,-Math.PI/2+Math.PI*k/120)));
+    drawCurve(Array.from({length:121},(_,k)=>spherePt(Math.PI,-Math.PI/2+Math.PI*k/120)));
+    drawCurve(Array.from({length:121},(_,k)=>spherePt(-Math.PI,-Math.PI/2+Math.PI*k/120)));
+    ctx.restore();return;
+  }
+  for(let lat=-60;lat<=60;lat+=30){const a=lat*Math.PI/180;drawCurve(Array.from({length:181},(_,k)=>spherePt(-Math.PI+2*Math.PI*k/180,a)))}
+  for(let lon=0;lon<360;lon+=30){const l=lon*Math.PI/180;drawCurve(Array.from({length:121},(_,k)=>spherePt(l,-Math.PI/2+Math.PI*k/120)))}
+  ctx.restore();
+}
+function exportDimsFor(canvas){
+  const maxSide=Number($('exportRes').value)||2160,ratio=(canvas.width||1)/(canvas.height||1);
+  if(ratio>=1)return{W:maxSide,H:Math.max(1,Math.round(maxSide/ratio))};
+  return{W:Math.max(1,Math.round(maxSide*ratio)),H:maxSide};
+}
+function renderPlaneExport(W,H){
+  readRange();compileFunction();
+  const out=document.createElement('canvas'),ctx=out.getContext('2d',{alpha:false});out.width=W;out.height=H;
+  const range=aspectRange(planeRange,W,H),img=ctx.createImageData(W,H),data=img.data;
+  for(let j=0,idx=0;j<H;j++){const y=range.ymax-(j+.5)*(range.ymax-range.ymin)/H;for(let i=0;i<W;i++,idx+=4){const x=range.xmin+(i+.5)*(range.xmax-range.xmin)/W,col=colorOf(evalF(C(x,y)));data[idx]=col[0];data[idx+1]=col[1];data[idx+2]=col[2];data[idx+3]=255}}
+  ctx.putImageData(img,0,0);drawPlaneOverlayOn(ctx,W,H,range);return out;
+}
+function renderSphereExport(W,H){
+  readRange();compileFunction();
+  const out=document.createElement('canvas'),ctx=out.getContext('2d',{alpha:true});out.width=W;out.height=H;
+  const mode=$('projectionMode').value,img=ctx.createImageData(W,H),data=img.data;
+  for(let j=0,idx=0;j<H;j++)for(let i=0;i<W;i++,idx+=4){
+    const uv=projectionUVFromPixel(i+.5,j+.5,W,H,mode);let u=uv[0],v=uv[1],shade=1,pt=null;
+    if(mode==='sphere'){
+      u/=sphere.zoom;v/=sphere.zoom;const rr=u*u+v*v;
+      if(rr>1){data[idx]=5;data[idx+1]=6;data[idx+2]=10;data[idx+3]=255;continue}
+      const sz=Math.sqrt(Math.max(0,1-rr));shade=.66+.34*sz;pt=rotInv(u,v,sz);
+    }else{
+      pt=spherePointFromProjection(u,v,mode);
+      if(!pt){data[idx]=5;data[idx+1]=6;data[idx+2]=10;data[idx+3]=255;continue}
+    }
+    const zc=planeFromSphere(pt[0],pt[1],pt[2]),col=colorOf(evalF(zc));
+    data[idx]=col[0]*shade|0;data[idx+1]=col[1]*shade|0;data[idx+2]=col[2]*shade|0;data[idx+3]=255;
+  }
+  ctx.putImageData(img,0,0);if($('showGraticule').checked)drawSphereGraticuleOn(ctx,W,H,mode);if($('showPhaseLegend').checked)drawPhaseLegend(ctx,W,H);return out;
+}
+function downloadCanvasBlob(c,name){
+  c.toBlob(blob=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500)},'image/png');
+}
+async function exportPlanePng(){
+  try{const {W,H}=exportDimsFor(planeCanvas);status(`Rendering sharp plane export ${W}×${H}…`);await new Promise(r=>requestAnimationFrame(r));const out=renderPlaneExport(W,H);downloadCanvasBlob(out,`complex-plane-${W}x${H}.png`);status(`Exported sharp plane PNG ${W}×${H}.`,true)}catch(e){err(e.message||String(e))}
+}
+async function exportSpherePng(){
+  try{const {W,H}=exportDimsFor(sphereCanvas);status(`Rendering sharp sphere/projection export ${W}×${H}…`);await new Promise(r=>requestAnimationFrame(r));const out=renderSphereExport(W,H);downloadCanvasBlob(out,`riemann-sphere-projection-${W}x${H}.png`);status(`Exported sharp sphere/projection PNG ${W}×${H}.`,true)}catch(e){err(e.message||String(e))}
+}
+$('drawBtn').onclick=redrawAll;$('resetBtn').onclick=()=>{planeRange={xmin:-2,xmax:2,ymin:-2,ymax:2};sphere={yaw:-.55,pitch:.35,zoom:.92};writeRange();redrawAll()};$('preset').onchange=()=>{if($('preset').value){$('expr').value=$('preset').value;redrawAll()}};$('fastPreviewBtn').onclick=()=>{fastPreview=!fastPreview;$('fastPreviewBtn').textContent=`Fast preview: ${fastPreview?'on':'off'}`};$('fitSphereBtn').onclick=()=>{sphere={yaw:-.55,pitch:.35,zoom:.92};drawSphere()};$('pathBtn').onclick=()=>{pathMode=!pathMode;planeCanvas.classList.toggle('pathMode',pathMode);status(pathMode?'Path mode on: click points; click near first point to close.':'Path mode off.')};$('clearPathBtn').onclick=()=>{pathPts=[];drawPlane();status('Path cleared.')};$('exportPlaneBtn').onclick=exportPlanePng;$('exportSphereBtn').onclick=exportSpherePng;
+for(const id of ['res','sphereRes'])$(id).oninput=()=>{$(id+'Label').textContent=$(id).value;scheduleRedraw()};$('exportRes').oninput=()=>{$('exportResLabel').textContent=$('exportRes').value+' px'};for(const id of ['xmin','xmax','ymin','ymax','colorMode','iter','escape','projectionMode','showGrid','showGraticule','showUnitCircle','showPhaseLegend','lockAspect','useGpu'])$(id).addEventListener('change',scheduleRedraw);
 planeCanvas.addEventListener('pointerdown',ev=>{planeCanvas.setPointerCapture(ev.pointerId);if(pathMode){const z=clientToComplex(ev),rect=planeCanvas.getBoundingClientRect(),range=aspectRange(planeRange,planeCanvas.width,planeCanvas.height);let closed=false;if(pathPts.length>=3){const f=pathPts[0],fx=(f.re-range.xmin)/(range.xmax-range.xmin)*rect.width,fy=(range.ymax-f.im)/(range.ymax-range.ymin)*rect.height;closed=Math.hypot(ev.clientX-rect.left-fx,ev.clientY-rect.top-fy)<14}if(closed){const I=estimatePathIntegral(true);pathPts.push(pathPts[0]);drawPlane();status(`Closed path automatically. ∫ f(z) dz ≈ ${formatC(I)}`,true)}else{pathPts.push(z);drawPlane();status(`Added point ${pathPts.length}: ${formatC(z)}\nOpen-path integral estimate: ${formatC(estimatePathIntegral(false))}`)}return}dragging={type:'plane',x:ev.clientX,y:ev.clientY,range:{...planeRange}}});
 planeCanvas.addEventListener('pointermove',ev=>{const range=aspectRange(planeRange,planeCanvas.width,planeCanvas.height),z=complexFromCanvas(planeCanvas,ev,range);try{const w=evalF(z);$('readout').textContent=`z = ${formatC(z)}\nf(z) = ${formatC(w)}\n|f(z)| = ${fmt(absC(w))}\narg f(z) = ${fmt(argC(w))} rad`}catch{}if(!dragging||dragging.type!=='plane')return;const rect=planeCanvas.getBoundingClientRect(),dx=(ev.clientX-dragging.x)/rect.width,dy=(ev.clientY-dragging.y)/rect.height,ar=aspectRange(dragging.range,planeCanvas.width,planeCanvas.height),w=ar.xmax-ar.xmin,h=ar.ymax-ar.ymin,cx=(dragging.range.xmin+dragging.range.xmax)/2-dx*w,cy=(dragging.range.ymin+dragging.range.ymax)/2+dy*h,ow=dragging.range.xmax-dragging.range.xmin,oh=dragging.range.ymax-dragging.range.ymin;planeRange={xmin:cx-ow/2,xmax:cx+ow/2,ymin:cy-oh/2,ymax:cy+oh/2};writeRange();queuePreview('plane');markFullRedraw('plane',180)});
 planeCanvas.addEventListener('wheel',ev=>{ev.preventDefault();const range=aspectRange(planeRange,planeCanvas.width,planeCanvas.height),z=complexFromCanvas(planeCanvas,ev,range),f=Math.exp(Math.sign(ev.deltaY)*.18);planeRange={xmin:z.re+(planeRange.xmin-z.re)*f,xmax:z.re+(planeRange.xmax-z.re)*f,ymin:z.im+(planeRange.ymin-z.im)*f,ymax:z.im+(planeRange.ymax-z.im)*f};writeRange();drawPlane(true);markFullRedraw('plane',120)},{passive:false});
 sphereCanvas.addEventListener('pointerdown',ev=>{sphereCanvas.setPointerCapture(ev.pointerId);dragging={type:'sphere',x:ev.clientX,y:ev.clientY,yaw:sphere.yaw,pitch:sphere.pitch}});sphereCanvas.addEventListener('pointermove',ev=>{if(!dragging||dragging.type!=='sphere')return;sphere.yaw=dragging.yaw-(ev.clientX-dragging.x)*.008;sphere.pitch=dragging.pitch+(ev.clientY-dragging.y)*.008;queuePreview('sphere');markFullRedraw('sphere',180)});sphereCanvas.addEventListener('wheel',ev=>{ev.preventDefault();sphere.zoom=Math.max(.35,Math.min(2.2,sphere.zoom*Math.exp(-Math.sign(ev.deltaY)*.08)));drawSphere(true);markFullRedraw('sphere',120)},{passive:false});
 window.addEventListener('pointerup',()=>{dragging=null;flushFullRedraw()});window.addEventListener('pointercancel',()=>{dragging=null;flushFullRedraw()});window.addEventListener('blur',()=>{dragging=null;flushFullRedraw()});window.addEventListener('resize',scheduleRedraw);if(window.visualViewport)visualViewport.addEventListener('resize',scheduleRedraw);window.addEventListener('orientationchange',()=>setTimeout(scheduleRedraw,250));
-$('resLabel').textContent=$('res').value;$('sphereResLabel').textContent=$('sphereRes').value;redrawAll();
+$('resLabel').textContent=$('res').value;$('sphereResLabel').textContent=$('sphereRes').value;$('exportResLabel').textContent=$('exportRes').value+' px';redrawAll();
 })();
 </script>
 </body>
