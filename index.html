@@ -285,7 +285,7 @@ function drawSphereGraticule(mode){
     }
     sctx.stroke();
   };
-  const spherePt=(lon,lat)=>[Math.cos(lat)*Math.sin(lon),Math.sin(lat),Math.cos(lat)*Math.cos(lon)];
+  const spherePt=(lon,lat)=>[Math.cos(lat)*Math.sin(lon),Math.cos(lat)*Math.cos(lon),Math.sin(lat)];
   if(mode==='sinusoidal'){
     // Keep this projection visually as one sinusoidal footprint: latitude parallels,
     // the central meridian, and the two bounding sinusoids only.  Drawing every
@@ -395,7 +395,7 @@ function drawPlaneOverlayOn(ctx,W,H,range){
 function drawSphereGraticuleOn(ctx,W,H,mode){
   ctx.save();ctx.strokeStyle='rgba(255,255,255,.45)';ctx.lineWidth=Math.max(1,W/1600);
   const drawCurve=pts=>{ctx.beginPath();let on=false,last=null;for(const p of pts){const q=projectSphereToCanvas(p[0],p[1],p[2],mode,W,H);if(!q){on=false;last=null;continue}if(last&&Math.hypot(q[0]-last[0],q[1]-last[1])>W*.45){on=false}on?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]);on=true;last=q}ctx.stroke()};
-  const spherePt=(lon,lat)=>[Math.cos(lat)*Math.sin(lon),Math.sin(lat),Math.cos(lat)*Math.cos(lon)];
+  const spherePt=(lon,lat)=>[Math.cos(lat)*Math.sin(lon),Math.cos(lat)*Math.cos(lon),Math.sin(lat)];
   if(mode==='sinusoidal'){
     for(let lat=-60;lat<=60;lat+=30){const a=lat*Math.PI/180;drawCurve(Array.from({length:181},(_,k)=>spherePt(-Math.PI+2*Math.PI*k/180,a)))}
     drawCurve(Array.from({length:121},(_,k)=>spherePt(0,-Math.PI/2+Math.PI*k/120)));
